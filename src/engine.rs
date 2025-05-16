@@ -2,10 +2,12 @@ use std::cmp;
 
 use shuuro::{
     Color, PieceType, Square,
+    attacks::Attacks,
     bitboard::BitBoard,
     piece_type::PieceTypeIter,
     position::{Board, Play},
     shuuro8::{
+        attacks8::Attacks8,
         bitboard8::BB8,
         board_defs::{FILE_BB, RANK_BB},
         position8::P8,
@@ -383,7 +385,7 @@ pub fn evaluate(position: &P8<Square8, BB8<Square8>>) -> i16 {
     evaluation * perspective
 }
 
-fn material_balance(piece_counts: &[[usize; 9]; 2], game_phase: i32) -> i32 {
+pub fn material_balance(piece_counts: &[[usize; 9]; 2], game_phase: i32) -> i32 {
     let mut material = [0, 0];
     let game_phase = {
         if game_phase > 12 {
@@ -402,11 +404,7 @@ fn material_balance(piece_counts: &[[usize; 9]; 2], game_phase: i32) -> i32 {
     material[0] - material[1]
 }
 
-fn pst_evaluation(
-    position: &P8<Square8, BB8<Square8>>,
-    piece_counts: &[[usize; 9]; 2],
-    game_phase: i32,
-) -> i32 {
+pub fn pst_evaluation(position: &P8<Square8, BB8<Square8>>, game_phase: i32) -> i32 {
     let mut score = 0;
 
     let pst = { if game_phase > 12 { PST } else { PST_ENDGAME } };
@@ -430,13 +428,13 @@ fn pst_evaluation(
     score
 }
 
-pub fn count_doubled_pawns(pawns: BB8<Square8>) -> u32 {
+pub fn count_doubled_pawns(pawns: BB8<Square8>) -> i32 {
     let mut count = 0;
-    for file in RANK_BB {
+    for file in FILE_BB {
         let bb = file & &pawns;
         count += bb.len() / 2;
     }
-    count
+    count as i32
 }
 
 pub fn count_isolated_pawns(pawns: BB8<Square8>) -> i32 {
@@ -453,10 +451,131 @@ pub fn count_isolated_pawns(pawns: BB8<Square8>) -> i32 {
     isolated
 }
 
-pub fn count_passed_pawns(pawns: BB8<Square8>, position: &P8<Square8, BB8<Square8>>) -> i32 {
-    let mut score = 0;
-    // let ref
-    score
+pub fn count_passed_pawns(
+    pawns: [BB8<Square8>; 2],
+    position: &P8<Square8, BB8<Square8>>,
+    passed_bb: [[BB8<Square8>; 64]; 2],
+    color: Color,
+) -> i32 {
+    let mut passed_pawn_bonus = 0;
+    let mut passed_pawn_count = 0;
+    let enemy = position.player_bb(color.flip());
+    let index = color.index();
+    for pawn in pawns[color.index()] {
+        let files = passed_bb[index][pawn.index()];
+        if (files & &enemy).is_empty() {
+            passed_pawn_count += 1;
+
+            passed_pawn_bonus += match pawn.rank() {
+                6 => 50, // On 7th rank (about to promote)
+                5 => 30, // On 6th rank
+                4 => 15, // On 5th rank
+                3 => 8,  // On 4th rank
+                _ => 3,  // Less advanced but still passed
+            };
+        }
+    }
+
+    (passed_pawn_count * 10) + passed_pawn_bonus
+}
+
+pub fn count_pawn_chains(
+    pawns: BB8<Square8>,
+    position: &P8<Square8, BB8<Square8>>,
+    color: Color,
+) -> i32 {
+    let mut visited = BB8::empty();
+
+    let mut total_bonus = 0;
+
+    fn count_attacks(
+        mut visited: BB8<Square8>,
+        sq: Square8,
+        mut size: u8,
+        color: Color,
+        pawns: BB8<Square8>,
+    ) -> (BB8<Square8>, u8) {
+        if (visited & &sq).is_any() {
+            return (visited, size);
+        }
+        visited |= &sq;
+        size += 1;
+
+        let attacks =
+            Attacks8::get_non_sliding_attacks(PieceType::King, &sq, color, BB8::empty()) & &pawns;
+        for sq in attacks {
+            (visited, size) = count_attacks(visited, sq, size, color, pawns);
+        }
+        (visited, size)
+    }
+
+    for pawn in pawns {
+        let counter = count_attacks(visited, pawn, 0, color, pawns);
+        visited = counter.0;
+        if counter.1 > 1 {
+            total_bonus += 1;
+            let chain_value = pawn_chain_bonus(pawn, color, position, pawns);
+            let chain_size = counter.1;
+
+            total_bonus += match chain_size {
+                1 => chain_value,         // Single pawn
+                2 => chain_value * 3 / 2, // Small chain
+                3 => chain_value * 2,     // Medium chain
+                _ => chain_value * 5 / 2, // Large chain (4+ pawns)
+            };
+        }
+    }
+    total_bonus
+}
+
+pub fn pawn_storm(position: &P8<Square8, BB8<Square8>>, color: Color, game_phase: i32) -> i32 {
+    let king = position.find_king(color).unwrap();
+    if color == Color::White {
+        if game_phase == 0 && king.file() > 5 {
+            return 25;
+        }
+    } else if color == Color::Black {
+        if game_phase == 0 && king.file() < 2 {
+            return 25;
+        }
+    }
+    let enemy_pawns = position.player_bb(color.flip()) & &position.type_bb(&PieceType::Pawn);
+
+    let new_rank: i8 = { if color == Color::White { 1 } else { -1 } };
+    let mut ranks = BB8::empty();
+    for i in 1..3 {
+        let new_rank = king.file() as i8 + (new_rank * i);
+        if new_rank < 0 || new_rank > 7 {
+            continue;
+        }
+        ranks |= &RANK_BB[new_rank as usize];
+    }
+    let storm = enemy_pawns & &ranks;
+    storm.len() as i32 * 7
+}
+
+fn pawn_chain_bonus(
+    pawn: Square8,
+    color: Color,
+    _position: &P8<Square8, BB8<Square8>>,
+    pawns: BB8<Square8>,
+) -> i32 {
+    let mut bonus = match pawn.file() {
+        3 | 4 => 5, // Center files
+        2 | 5 => 4, // Semi-center
+        1 | 6 => 3, // Flank
+        _ => 2,
+    };
+    let attacks =
+        Attacks8::get_non_sliding_attacks(PieceType::Pawn, &pawn, color.flip(), BB8::empty());
+    if (attacks & &pawns).is_any() {
+        bonus += 3;
+    }
+    let attacks = Attacks8::get_non_sliding_attacks(PieceType::Pawn, &pawn, color, BB8::empty());
+    if (attacks & &pawns).is_any() {
+        bonus += 2;
+    }
+    bonus
 }
 
 pub fn mobility_evaluation(position: &P8<Square8, BB8<Square8>>, game_phase: i32) -> i32 {
@@ -482,7 +601,87 @@ pub fn mobility_evaluation(position: &P8<Square8, BB8<Square8>>, game_phase: i32
     (mobility[0] - mobility[1]) / 2
 }
 
-pub fn pawn_shield(position: &P8<Square8, BB8<Square8>>) {}
+pub fn pawn_structure_evaluation(position: &P8<Square8, BB8<Square8>>) -> i32 {
+    let mut score = 0;
+    let pawns = [
+        (position.player_bb(Color::White) & &position.type_bb(&PieceType::Pawn)),
+        (position.player_bb(Color::Black) & &position.type_bb(&PieceType::Pawn)),
+    ];
+
+    // Doubled pawns penalty
+    score -= 10 * count_doubled_pawns(pawns[0]);
+    score += 10 * count_doubled_pawns(pawns[1]);
+
+    // Isolated pawns penalty
+    score -= 20 * count_isolated_pawns(pawns[0]);
+    score += 20 * count_isolated_pawns(pawns[1]);
+
+    // Passed pawns bonus
+    score += 30 * count_passed_pawns(pawns, position, generate_passed_pawns_bb(), Color::White);
+    score -= 30 * count_passed_pawns(pawns, position, generate_passed_pawns_bb(), Color::Black);
+
+    // Pawn chains bonus
+    score += 15 * count_pawn_chains(pawns[0], position, Color::White);
+    score -= 15 * count_pawn_chains(pawns[1], position, Color::Black);
+
+    score
+}
+
+pub fn king_shelter_penalty(position: &P8<Square8, BB8<Square8>>, color: Color) -> i32 {
+    let mut penalty = 0;
+    let king = position.find_king(color).unwrap();
+    let file = king.file();
+    let (end, before_end) = {
+        if color == Color::White {
+            (king.up_edge(), king.up_edge() - 1)
+        } else {
+            (0, 1)
+        }
+    };
+    if file == end || file == before_end {
+        return 20;
+    }
+    let attacks = Attacks8::get_non_sliding_attacks(PieceType::King, &king, color, BB8::empty());
+    let rank_above = {
+        if color == Color::White {
+            (file + 1) as usize
+        } else {
+            (file - 1) as usize
+        }
+    };
+    let pawns = position.player_bb(color) & &position.type_bb(&PieceType::Pawn);
+    let rank_above = RANK_BB[rank_above as usize];
+    let rank_above = (rank_above & &attacks) & &pawns;
+    penalty -= rank_above.len() as i32 * 15;
+
+    let pawns = FILE_BB[file as usize] & &pawns;
+    if pawns.is_empty() {
+        penalty += 30;
+    }
+    penalty
+}
+
+pub fn generate_passed_pawns_bb() -> [[BB8<Square8>; 64]; 2] {
+    let mut all = [[BB8::empty(); 64]; 2];
+    for color in [Color::White, Color::Black] {
+        for sq in Square8::iter() {
+            if sq.rank() == 0 || sq.rank() == 7 {
+                continue;
+            }
+            let mut file = NEIGHBOR_FILES[sq.file() as usize] | &FILE_BB[sq.file() as usize];
+            let to = {
+                if color == Color::Black {
+                    file.pop().unwrap()
+                } else {
+                    file.pop_reverse().unwrap()
+                }
+            };
+            let range = Attacks8::between(sq, to) | &to;
+            all[color.index()][sq.index() as usize] = range;
+        }
+    }
+    all
+}
 
 const fn generate_neighbor_files() -> [BB8<Square8>; 8] {
     let mut files = [BB8::new(0); 8];
@@ -491,7 +690,7 @@ const fn generate_neighbor_files() -> [BB8<Square8>; 8] {
         if file == 0 {
             files[0] = FILE_BB[1];
         } else if file == 7 {
-            files[7] = FILE_BB[7];
+            files[7] = FILE_BB[6];
         } else {
             let left = FILE_BB[file as usize - 1];
             let right = FILE_BB[file as usize + 1];
