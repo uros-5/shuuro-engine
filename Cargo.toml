@@ -1,0 +1,8 @@
+[package]
+name = "shuuro-engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+shuuro = { path="../shuuro", features = ["shuuro12", "shuuro8", "shuuro6"] }
