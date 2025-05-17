@@ -1,4 +1,4 @@
-use std::{cmp, collections::HashMap};
+use std::{cmp, collections::HashMap, f32::INFINITY};
 
 use shuuro::{
     Color, Move, PieceType, Square,
@@ -350,6 +350,48 @@ const PHASE_WEIGHTS: [i32; 9] = [0, 4, 2, 1, 1, 0, 3, 2, 1];
 
 /// Calculate game phase with additional pieces
 
+pub fn uci_loop() {
+    println!("id name MyRustEngine");
+    println!("id author YourName");
+    println!("uciok");
+
+    Attacks8::init();
+
+    let mut position = P8::default();
+    position
+        .set_sfen("4k3/1ppppppp/8/8/8/RP6/P1PPPPPP/RNBQKBNR w - 1")
+        .unwrap();
+
+    loop {
+        println!("{position}");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+        let input = input.trim();
+
+        match input {
+            "isready" => println!("readyok"),
+            "uci" => {
+                println!("id name MyRustEngine");
+                println!("id author YourName");
+                println!("uciok");
+            }
+            "quit" => break,
+            cmd if cmd.starts_with("position") => {
+                // Parse position command
+                println!("{position}");
+            }
+            cmd if cmd.starts_with("go") => {
+                // Start search and return best move
+
+                let best_move =
+                    alpha_beta_search(&position, 2, -INFINITY as i32, INFINITY as i32, true);
+                println!("bestmove {}", best_move);
+            }
+            _ => (),
+        }
+    }
+}
+
 pub fn alpha_beta_search(
     position: &P8<Square8, BB8<Square8>>,
     depth: i32,
@@ -363,12 +405,20 @@ pub fn alpha_beta_search(
 
     let moves = position.legal_moves(position.side_to_move());
     let moves = generate_list_of_moves(moves);
+    // for m in &moves {
+    //     println!("{m}\n");
+    // }
+    // println!("\n");
+    dbg!(position.side_to_move());
     if moves.is_empty() {
         return if position.in_check(position.side_to_move()) {
+            dbg!("winner");
             // Checkmate
             if maximizing_player {
+                dbg!("here");
                 i32::MIN + 1
             } else {
+                dbg!("here2", i32::MAX - 1);
                 i32::MAX - 1
             }
         } else {
@@ -380,6 +430,10 @@ pub fn alpha_beta_search(
     if maximizing_player {
         let mut max_eval = i32::MIN;
         for mv in moves {
+            if mv.to_fen() == "a3_a8" {
+                println!("nice");
+            }
+            let mv2 = mv.clone();
             let mut new_board = position.clone();
             let _ = new_board.make_move(mv);
             let eval = alpha_beta_search(&new_board, depth - 1, alpha, beta, false);
@@ -459,8 +513,6 @@ pub fn quiescence_search(
     if maximizing_player { alpha } else { beta }
 }
 
-pub fn generate_captures() {}
-
 pub fn evaluate_position(position: &P8<Square8, BB8<Square8>>, color: Color) -> i32 {
     let mut eval = 0;
 
@@ -510,6 +562,9 @@ pub fn count_material(position: &P8<Square8, BB8<Square8>>, color: Color) -> [u3
     let mut piece_counts = [0; 9];
     let player = position.player_bb(color);
     for pt in PieceTypeIter::default() {
+        if pt == PieceType::Plinth {
+            break;
+        }
         let bb = position.type_bb(&pt) & &player;
         piece_counts[pt.index()] = bb.len();
     }
@@ -542,6 +597,10 @@ pub fn material_balance(piece_counts: &[[u32; 9]; 2], game_phase: i32) -> i32 {
     };
     for color in [Color::White, Color::Black] {
         for pt in PieceTypeIter::default() {
+            if pt == PieceType::Plinth {
+                break;
+            }
+
             let value = game_phase[color.index()][pt.index()]
                 * piece_counts[color.index()][pt.index()] as i32;
             material[color.index()] += value;
