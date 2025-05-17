@@ -373,6 +373,9 @@ pub fn evalaute_position(position: &P8<Square8, BB8<Square8>>, color: Color) -> 
     // King safety
     eval += king_safety_evaluation(position, game_phase);
 
+    // Other positional factors
+    eval += other_positional_factors(position);
+
     if position.side_to_move() == Color::White {
         eval += 10;
     } else {
@@ -807,6 +810,76 @@ pub fn king_shelter_penalty(position: &P8<Square8, BB8<Square8>>, color: Color) 
     penalty
 }
 
+pub fn other_positional_factors(position: &P8<Square8, BB8<Square8>>) -> i32 {
+    let mut score = 0;
+
+    let white_bishops = position.player_bb(Color::White) & &position.type_bb(&PieceType::Bishop);
+    if white_bishops.len() >= 2 {
+        score += 30;
+    }
+    let black_bishops = position.player_bb(Color::Black) & &position.type_bb(&PieceType::Bishop);
+    if black_bishops.len() >= 2 {
+        score -= 30;
+    }
+
+    for color in [Color::White, Color::Black] {
+        let rooks = position.player_bb(color) & &position.type_bb(&PieceType::Rook);
+        for rook in rooks {
+            let file = FILE_BB[rook.file() as usize];
+            let pawns = position.type_bb(&PieceType::Pawn);
+            let my_pawns = pawns & &position.player_bb(color);
+            let their_pawns = pawns & &position.player_bb(color.flip());
+            let is_open = (file & &pawns).is_empty();
+            let is_semi_open = ((file & &their_pawns) & &!&my_pawns).is_any();
+
+            match (is_open, is_semi_open, color) {
+                (true, _, Color::White) => score += 20, // Open file (strongest)
+                (_, true, Color::White) => score += 10, // Semi-open (still good)
+                (true, _, Color::Black) => score -= 20, // Black benefits similarly
+                (_, true, Color::Black) => score -= 10,
+                _ => (),
+            };
+        }
+
+        let knights = position.player_bb(color) & &position.type_bb(&PieceType::Knight);
+        for knight in knights {
+            let outpost = is_outpost(knight, color, position);
+            if outpost {
+                match color {
+                    Color::White => score += 25,
+                    Color::Black => score -= 25,
+                    _ => (),
+                };
+            }
+        }
+    }
+
+    score
+}
+
+pub fn is_outpost(sq: Square8, color: Color, position: &P8<Square8, BB8<Square8>>) -> bool {
+    let in_enemy_territory = match color {
+        Color::White => (PLAYER_TERRITORY[1] & &sq).is_any(),
+        Color::Black => (PLAYER_TERRITORY[0] & &sq).is_any(),
+        Color::NoColor => false,
+    };
+    if !in_enemy_territory {
+        return false;
+    }
+
+    let pawns = position.type_bb(&PieceType::Pawn);
+    let my_pawns = pawns & &position.player_bb(color);
+    let enemy_pawns = position.player_bb(color.flip()) & &pawns;
+
+    let attacks =
+        Attacks8::get_non_sliding_attacks(PieceType::Pawn, &sq, color.flip(), BB8::empty());
+    let protected = (attacks & &my_pawns).is_any();
+    let attacks = Attacks8::get_non_sliding_attacks(PieceType::Pawn, &sq, color, BB8::empty());
+    let attackable = (attacks & &enemy_pawns).is_any();
+
+    protected && !attackable
+}
+
 pub fn generate_passed_pawns_bb() -> [[BB8<Square8>; 64]; 2] {
     let mut all = [[BB8::empty(); 64]; 2];
     for color in [Color::White, Color::Black] {
@@ -848,4 +921,23 @@ const fn generate_neighbor_files() -> [BB8<Square8>; 8] {
     files
 }
 
+pub const fn generate_player_sides() -> [BB8<Square8>; 2] {
+    let mut white = BB8::new(0);
+    let mut black = BB8::new(0);
+    let end = 4;
+    let mut current_rank = 0;
+    while current_rank < end {
+        white = BB8::new(white.0 | RANK_BB[current_rank as usize].0);
+        current_rank += 1;
+    }
+    let end = 8;
+    let mut current_rank = 4;
+    while current_rank < end {
+        black = BB8::new(black.0 | RANK_BB[current_rank as usize].0);
+        current_rank += 1;
+    }
+    [white, black]
+}
+
 pub const NEIGHBOR_FILES: [BB8<Square8>; 8] = generate_neighbor_files();
+pub const PLAYER_TERRITORY: [BB8<Square8>; 2] = generate_player_sides();
