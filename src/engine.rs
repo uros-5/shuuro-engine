@@ -350,7 +350,39 @@ const PHASE_WEIGHTS: [i32; 9] = [0, 4, 2, 1, 1, 0, 3, 2, 1];
 
 /// Calculate game phase with additional pieces
 
-pub fn calculate_game_phase(piece_counts: &[[usize; 9]; 2]) -> i32 {
+pub fn evalaute_position(position: &P8<Square8, BB8<Square8>>, color: Color) -> i32 {
+    let mut eval = 0;
+
+    let white_material = count_material(position, color);
+    let black_material = count_material(position, color.flip());
+    let piece_counts = [white_material, black_material];
+    let game_phase = calculate_game_phase(&piece_counts);
+
+    // Material
+    eval += material_balance(&piece_counts, game_phase);
+
+    // Piece-square tables
+    eval += pst_evaluation(position, game_phase);
+
+    // Pawn structure
+    eval += pawn_structure_evaluation(position);
+
+    // Mobility
+    eval += mobility_evaluation(position, game_phase);
+
+    // King safety
+    eval += king_safety_evaluation(position, game_phase);
+
+    if position.side_to_move() == Color::White {
+        eval += 10;
+    } else {
+        eval -= 10;
+    }
+
+    eval
+}
+
+pub fn calculate_game_phase(piece_counts: &[[u32; 9]; 2]) -> i32 {
     let mut phase = 0;
     for color in piece_counts {
         for (piece, &count) in color.iter().enumerate() {
@@ -385,7 +417,7 @@ pub fn evaluate(position: &P8<Square8, BB8<Square8>>) -> i16 {
     evaluation * perspective
 }
 
-pub fn material_balance(piece_counts: &[[usize; 9]; 2], game_phase: i32) -> i32 {
+pub fn material_balance(piece_counts: &[[u32; 9]; 2], game_phase: i32) -> i32 {
     let mut material = [0, 0];
     let game_phase = {
         if game_phase > 12 {
@@ -674,12 +706,24 @@ pub fn mobility_evaluation(position: &P8<Square8, BB8<Square8>>, game_phase: i32
                 continue;
             };
             let moves = sq.1;
+            let attack_plinth = (position.type_bb(&PieceType::Plinth) & &moves).is_any();
 
             let mobility_weight = match (piece.piece_type, game_phase > 12) {
                 (PieceType::Queen, true) => 4, // Queen mobility more important in midgame
-                (PieceType::Knight, false) => 3, // Knight mobility more important in endgame
-                (PieceType::Chancellor, true) | (PieceType::ArchBishop, true) => 5,
-                (PieceType::Chancellor, false) | (PieceType::ArchBishop, false) => 3,
+                (PieceType::Knight, false) => {
+                    // Knight mobility more important in endgame
+                    if attack_plinth { 3 } else { 2 }
+                }
+                (PieceType::Chancellor, true) | (PieceType::ArchBishop, true) => {
+                    if attack_plinth {
+                        5
+                    } else {
+                        4
+                    }
+                }
+                (PieceType::Chancellor, false) | (PieceType::ArchBishop, false) => {
+                    if attack_plinth { 4 } else { 3 }
+                }
                 _ => 1,
             };
             mobility[color.index()] = moves.len() as i32 * mobility_weight;
