@@ -554,6 +554,93 @@ pub fn pawn_storm(position: &P8<Square8, BB8<Square8>>, color: Color, game_phase
     storm.len() as i32 * 7
 }
 
+pub fn king_behind_plinth(position: &P8<Square8, BB8<Square8>>, color: Color) -> bool {
+    let plinths = position.type_bb(&PieceType::Plinth);
+    let king = position.find_king(color).unwrap();
+    let mut behind = plinths & &king;
+    if behind.is_empty() {
+        return false;
+    }
+    if color == Color::White {
+        let sq = behind.pop_reverse().unwrap();
+        sq == king
+    } else {
+        let sq = behind.pop().unwrap();
+        sq == king
+    }
+}
+
+pub fn king_attackers_penalty(position: &P8<Square8, BB8<Square8>>, color: Color) -> i32 {
+    let enemy_moves = position.enemy_moves(color);
+    let enemies = position.player_bb(color.flip());
+    let king = position.find_king(color).unwrap();
+    let mut penalty = 0;
+    let mut attackers = 0;
+    for enemy in enemies {
+        let piece = position.piece_at(enemy).unwrap();
+        let distance = Attacks8::between(king, king);
+        if (distance & &enemy_moves).is_any() {
+            penalty += attacker_weight(piece.piece_type, position, enemy)
+                * proximity_factor(distance.len() as i32);
+            attackers += 1;
+        }
+    }
+    let defenders = (enemy_moves & &position.player_bb(color)).len() as i32;
+    penalty * safety_factor(attackers, defenders)
+}
+
+fn safety_factor(attackers_count: i32, defenders_count: i32) -> i32 {
+    // Exponential penalty for multiple attackers
+    match attackers_count.saturating_sub(defenders_count) {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        4 => 16,
+        _ => 32,
+    }
+}
+
+fn attacker_weight(piece: PieceType, position: &P8<Square8, BB8<Square8>>, sq: Square8) -> i32 {
+    match piece {
+        PieceType::Queen => 5,  // Most dangerous attacker (multiple directions)
+        PieceType::Rook => 3,   // Dangerous file/rank attacks
+        PieceType::Bishop => 2, // Diagonal attacks        PieceType::Knight => 2,     // Tricky jumping attacks
+        PieceType::Pawn => 1,   // Least dangerous but still threatening
+        PieceType::Chancellor => {
+            if (position.type_bb(&PieceType::Plinth) & &sq).is_any() {
+                return 5;
+            }
+            4
+        } // Rook+Knight hybrid (more dangerous than rook alone)
+        PieceType::ArchBishop => {
+            if (position.type_bb(&PieceType::Plinth) & &sq).is_any() {
+                return 4;
+            }
+            3
+        } // Bishop+Knight hybrid (similar to rook)
+        PieceType::Giraffe => 1, // Custom piece (adjust based on movement)
+        PieceType::Knight => {
+            if (position.type_bb(&PieceType::Plinth) & &sq).is_any() {
+                return 3;
+            }
+
+            2
+        }
+        _ => 0,
+    }
+}
+
+fn proximity_factor(distance: i32) -> i32 {
+    match distance {
+        1 => 5, // Direct contact
+        2 => 4,
+        3 => 3,
+        4 => 2,
+        _ => 1, // Distant pieces matter less
+    }
+}
+
 fn pawn_chain_bonus(
     pawn: Square8,
     color: Color,
@@ -624,6 +711,21 @@ pub fn pawn_structure_evaluation(position: &P8<Square8, BB8<Square8>>) -> i32 {
     score += 15 * count_pawn_chains(pawns[0], position, Color::White);
     score -= 15 * count_pawn_chains(pawns[1], position, Color::Black);
 
+    score
+}
+
+pub fn king_safety_evaluation(position: &P8<Square8, BB8<Square8>>, game_phase: i32) -> i32 {
+    if game_phase <= 12 {
+        return 0;
+    }
+
+    let mut score = 0;
+
+    score -= king_shelter_penalty(&position, Color::White);
+    score -= king_attackers_penalty(&position, Color::Black);
+
+    score += king_attackers_penalty(&position, Color::Black);
+    score += king_shelter_penalty(&position, Color::White);
     score
 }
 
