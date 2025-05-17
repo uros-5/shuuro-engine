@@ -1,7 +1,7 @@
-use std::cmp;
+use std::{cmp, collections::HashMap};
 
 use shuuro::{
-    Color, PieceType, Square,
+    Color, Move, PieceType, Square,
     attacks::Attacks,
     bitboard::BitBoard,
     piece_type::PieceTypeIter,
@@ -350,7 +350,118 @@ const PHASE_WEIGHTS: [i32; 9] = [0, 4, 2, 1, 1, 0, 3, 2, 1];
 
 /// Calculate game phase with additional pieces
 
-pub fn evalaute_position(position: &P8<Square8, BB8<Square8>>, color: Color) -> i32 {
+pub fn alpha_beta_search(
+    position: &P8<Square8, BB8<Square8>>,
+    depth: i32,
+    mut alpha: i32,
+    mut beta: i32,
+    maximizing_player: bool,
+) -> i32 {
+    if depth == 0 {
+        return quiescence_search(position, alpha, beta, maximizing_player);
+    }
+
+    let moves = position.legal_moves(position.side_to_move());
+    let moves = generate_list_of_moves(moves);
+    if moves.is_empty() {
+        return if position.in_check(position.side_to_move()) {
+            // Checkmate
+            if maximizing_player {
+                i32::MIN + 1
+            } else {
+                i32::MAX - 1
+            }
+        } else {
+            // Stalemate
+            0
+        };
+    }
+
+    if maximizing_player {
+        let mut max_eval = i32::MIN;
+        for mv in moves {
+            let mut new_board = position.clone();
+            let _ = new_board.make_move(mv);
+            let eval = alpha_beta_search(&new_board, depth - 1, alpha, beta, false);
+            max_eval = max_eval.max(eval);
+            alpha = alpha.max(eval);
+            if beta <= alpha {
+                break; // Beta cutoff
+            }
+        }
+        max_eval
+    } else {
+        let mut min_eval = i32::MAX;
+        for mv in moves {
+            let mut new_board = position.clone();
+            let _ = new_board.make_move(mv);
+            let eval = alpha_beta_search(&new_board, depth - 1, alpha, beta, true);
+            min_eval = min_eval.min(eval);
+            beta = beta.min(eval);
+            if beta <= alpha {
+                break; // Alpha cutoff
+            }
+        }
+        min_eval
+    }
+}
+
+pub fn quiescence_search(
+    position: &P8<Square8, BB8<Square8>>,
+    mut alpha: i32,
+    mut beta: i32,
+    maximizing_player: bool,
+) -> i32 {
+    let stand_pat = evaluate_position(position, position.side_to_move());
+
+    if maximizing_player {
+        if stand_pat >= beta {
+            return beta;
+        }
+        alpha = alpha.max(stand_pat);
+    } else {
+        if stand_pat <= alpha {
+            return alpha;
+        }
+        beta = beta.min(stand_pat);
+    }
+
+    let legal_moves = position.legal_moves(position.side_to_move());
+    let enemy_pieces = position.player_bb(position.side_to_move().flip());
+    let mut captures = vec![];
+    for (piece, moves) in legal_moves {
+        let _captures = moves & &enemy_pieces;
+        for capture in _captures {
+            let to = capture;
+            let m = Move::new(piece, to);
+            captures.push(m);
+        }
+    }
+
+    for mv in captures {
+        let mut new_board = position.clone();
+        let _ = new_board.make_move(mv);
+        let eval = quiescence_search(&new_board, alpha, beta, !maximizing_player);
+
+        if maximizing_player {
+            alpha = alpha.max(eval);
+            if alpha >= beta {
+                break;
+            }
+        } else {
+            beta = beta.min(eval);
+            if beta <= alpha {
+                break;
+            }
+        }
+    }
+
+    if maximizing_player { alpha } else { beta }
+}
+
+pub fn generate_captures() {}
+
+pub fn evaluate_position(position: &P8<Square8, BB8<Square8>>, color: Color) -> i32 {
     let mut eval = 0;
 
     let white_material = count_material(position, color);
@@ -937,6 +1048,18 @@ pub const fn generate_player_sides() -> [BB8<Square8>; 2] {
         current_rank += 1;
     }
     [white, black]
+}
+
+pub fn generate_list_of_moves(legal_moves: HashMap<Square8, BB8<Square8>>) -> Vec<Move<Square8>> {
+    let mut moves = vec![];
+    for (sq, _moves) in legal_moves {
+        let from = sq;
+        for to in _moves {
+            let m = Move::new(from, to);
+            moves.push(m);
+        }
+    }
+    moves
 }
 
 pub const NEIGHBOR_FILES: [BB8<Square8>; 8] = generate_neighbor_files();
