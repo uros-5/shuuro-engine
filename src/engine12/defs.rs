@@ -1,3 +1,9 @@
+use shuuro::shuuro12::{
+    bitboard12::BB12,
+    board_defs::{FILE_BB, RANK_BB},
+    square12::Square12,
+};
+
 pub const PIECE_VALUES: [[i32; 9]; 2] = [
     [
         0,    // King (effectively infinite, but using a large number)
@@ -390,3 +396,45 @@ pub const PST_ENDGAME: [[[i32; 144]; 9]; 2] = [
         ],
     ],
 ];
+
+pub const NEIGHBOR_FILES: [BB12<Square12>; 12] = generate_neighbor_files();
+pub const PLAYER_TERRITORY: [BB12<Square12>; 2] = generate_player_sides();
+
+const fn generate_neighbor_files() -> [BB12<Square12>; 12] {
+    let mut files = [BB12::new(0, 0); 12];
+    let mut file = 0;
+    while file < 12 {
+        if file == 0 {
+            files[0] = FILE_BB[1];
+        } else if file == 11 {
+            files[11] = FILE_BB[10];
+        } else {
+            let left = FILE_BB[file as usize - 1];
+            let right = FILE_BB[file as usize + 1];
+            files[file] = BB12::new(left.0.0 | right.0.0, left.0.1 | right.0.1);
+        }
+        file += 1;
+    }
+
+    files
+}
+
+const fn generate_player_sides() -> [BB12<Square12>; 2] {
+    let mut white = BB12::new(0, 0);
+    let mut black = BB12::new(0, 0);
+    let end = 4;
+    let mut current_rank = 0;
+    while current_rank < end {
+        let rank = RANK_BB[current_rank as usize];
+        white = BB12::new(white.0.0 | rank.0.0, white.0.1 | rank.0.1);
+        current_rank += 1;
+    }
+    let end = 8;
+    let mut current_rank = 4;
+    while current_rank < end {
+        let rank = RANK_BB[current_rank as usize];
+        black = BB12::new(black.0.0 | rank.0.0, black.0.1 | rank.0.1);
+        current_rank += 1;
+    }
+    [white, black]
+}
