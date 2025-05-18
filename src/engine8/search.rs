@@ -45,10 +45,9 @@ pub fn uci_loop() {
     Attacks8::init();
 
     let mut position = P8::default();
-    // position
-    //     .set_sfen("4k3/1ppppppp/8/8/8/RP6/P1PPPPPP/RNBQKBNR w - 1")
-    //     .unwrap();
-    position.set_sfen("7k/5Q2/6K1/8/8/8/8/8 w - 1").unwrap();
+    position
+        .set_sfen("4k3/4r3/8/4n3/8/8/5PPP/5BNK b - 1")
+        .unwrap();
 
     loop {
         println!("{position}");
@@ -68,39 +67,49 @@ pub fn uci_loop() {
 
                 let best_move = alpha_beta_search(
                     &position,
-                    2,
+                    3,
                     -INFINITY as i32,
                     INFINITY as i32,
-                    position.side_to_move() == Color::White,
+                    position.side_to_move(),
                 );
                 println!("bestmove {:?}", best_move.1.unwrap().to_fen());
+            }
+            cmd if cmd.starts_with("move") => {
+                let mut mv = cmd.split_whitespace();
+                mv.next();
+                let Some(mv) = mv.next() else { continue };
+                let Some(mv) = Move::<Square8>::from_sfen(mv) else {
+                    continue;
+                };
+                let mv = position.make_move(mv);
+                dbg!(mv);
             }
             _ => (),
         }
     }
 }
 
-pub fn alpha_beta_search(
+fn alpha_beta_search(
     position: &P8<Square8, BB8<Square8>>,
     depth: i32,
     mut alpha: i32,
     mut beta: i32,
-    maximizing_player: bool,
+    player: Color,
 ) -> (i32, Option<Move<Square8>>) {
-    dbg!(position.side_to_move());
-    // let mut best_move = None;
     if depth == 0 {
-        return quiescence_search(position, alpha, beta, maximizing_player);
+        return quiescence_search(position, alpha, beta, player);
     }
 
-    let moves = position.legal_moves(position.side_to_move());
-    let moves = generate_list_of_moves(moves);
+    // Generate moves first to detect mate/stalemate
+    let moves = position.legal_moves(player);
 
+    // Early termination for mate/stalemate
     if moves.is_empty() {
         let last_move = own_last_move(position);
-        return if position.in_check(position.side_to_move()) {
-            // Checkmate
-            if maximizing_player {
+
+        return if position.in_check(player) {
+            // Checkmate - return a null move BUT with mate score
+            if player == Color::White {
                 (i32::MIN, last_move)
             } else {
                 (i32::MAX, last_move)
@@ -111,60 +120,53 @@ pub fn alpha_beta_search(
         };
     }
 
-    let mut last_move = None;
-    // let mut last_move = own_last_move(position);
+    let mut best_move = None;
 
-    if maximizing_player {
-        let mut max_eval = i32::MIN;
-        // let mut last_move = None;
-        for mv in moves {
-            let mut new_board = position.clone();
-            let _ = new_board.make_move(mv);
-            let eval = alpha_beta_search(&new_board, depth - 1, alpha, beta, false);
-            // last_move = eval.1;
-            if last_move == None {
-                last_move = eval.1.clone();
-            }
-            max_eval = max_eval.max(eval.0);
-            alpha = alpha.max(max_eval);
-            if alpha >= beta {
-                return (max_eval, eval.1);
-            }
-        }
-        (max_eval, last_move)
+    let mut best_score = if player == Color::White {
+        i32::MIN
     } else {
-        let mut min_eval = i32::MAX;
-        // let mut last_move = None;
-        for mv in moves {
-            let mut new_board = position.clone();
-            let z = mv.to_fen() == "e5_g4";
-            let _ = new_board.make_move(mv);
-            let eval = alpha_beta_search(&new_board, depth - 1, alpha, beta, true);
-            if last_move == None {
-                last_move = eval.1.clone();
-            }
+        i32::MAX
+    };
+    let moves = generate_list_of_moves(moves);
 
-            min_eval = min_eval.min(eval.0);
-            beta = beta.min(min_eval);
-            // dbg!(beta, alpha, min_eval);
-            if beta <= alpha {
-                return (min_eval, eval.1);
+    for mv in moves {
+        let mut new_board = position.clone();
+        let mv2 = mv.clone();
+        let _ = new_board.make_move(mv);
+        let (score, _) = alpha_beta_search(&new_board, depth - 1, alpha, beta, player.flip());
+
+        if player == Color::White {
+            if score > best_score {
+                best_score = score;
+                best_move = Some(mv2); // Track the actual move leading to this score
+                alpha = alpha.max(score);
+            }
+        } else {
+            if score < best_score {
+                best_score = score;
+                best_move = Some(mv2);
+                beta = beta.min(score);
             }
         }
-        (min_eval, last_move)
+
+        if alpha >= beta {
+            break;
+        }
     }
+
+    (best_score, best_move)
 }
 
 pub fn quiescence_search(
     position: &P8<Square8, BB8<Square8>>,
     mut alpha: i32,
     mut beta: i32,
-    maximizing_player: bool,
+    player: Color,
 ) -> (i32, Option<Move<Square8>>) {
     let stand_pat = evaluate_position(position, position.side_to_move());
 
     let mut last_move = own_last_move(position);
-    if maximizing_player {
+    if player == Color::White {
         if stand_pat >= beta {
             return (beta, last_move);
         }
@@ -191,9 +193,9 @@ pub fn quiescence_search(
     for mv in captures {
         let mut new_board = position.clone();
         let _ = new_board.make_move(mv);
-        let eval = quiescence_search(&new_board, alpha, beta, !maximizing_player);
+        let eval = quiescence_search(&new_board, alpha, beta, player.flip());
 
-        if maximizing_player {
+        if player == Color::White {
             alpha = alpha.max(eval.0);
             if alpha >= beta {
                 last_move = eval.1;
@@ -208,7 +210,7 @@ pub fn quiescence_search(
         }
     }
 
-    if maximizing_player {
+    if player == Color::White {
         (alpha, last_move)
     } else {
         (beta, last_move)
