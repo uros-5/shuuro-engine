@@ -1,3 +1,9 @@
+use shuuro::shuuro8::{
+    bitboard8::BB8,
+    board_defs::{FILE_BB, RANK_BB},
+    square8::Square8,
+};
+
 // Piece values - reordered and expanded
 pub const PIECE_VALUES: [[i32; 9]; 2] = [
     // Midgame values - White
@@ -311,3 +317,42 @@ pub const PST_ENDGAME: [[[i32; 64]; 9]; 2] = [
 ];
 
 pub const PHASE_WEIGHTS: [i32; 9] = [0, 4, 2, 1, 1, 0, 3, 2, 1];
+pub const NEIGHBOR_FILES: [BB8<Square8>; 8] = generate_neighbor_files();
+pub const PLAYER_TERRITORY: [BB8<Square8>; 2] = generate_player_sides();
+
+const fn generate_neighbor_files() -> [BB8<Square8>; 8] {
+    let mut files = [BB8::new(0); 8];
+    let mut file = 0;
+    while file < 8 {
+        if file == 0 {
+            files[0] = FILE_BB[1];
+        } else if file == 7 {
+            files[7] = FILE_BB[6];
+        } else {
+            let left = FILE_BB[file as usize - 1];
+            let right = FILE_BB[file as usize + 1];
+            files[file] = BB8::new(left.0 | right.0);
+        }
+        file += 1;
+    }
+
+    files
+}
+
+const fn generate_player_sides() -> [BB8<Square8>; 2] {
+    let mut white = BB8::new(0);
+    let mut black = BB8::new(0);
+    let end = 4;
+    let mut current_rank = 0;
+    while current_rank < end {
+        white = BB8::new(white.0 | RANK_BB[current_rank as usize].0);
+        current_rank += 1;
+    }
+    let end = 8;
+    let mut current_rank = 4;
+    while current_rank < end {
+        black = BB8::new(black.0 | RANK_BB[current_rank as usize].0);
+        current_rank += 1;
+    }
+    [white, black]
+}

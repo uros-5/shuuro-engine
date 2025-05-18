@@ -20,22 +20,8 @@ use shuuro::{
     },
 };
 
-// Game phase
-#[derive(Debug)]
-pub enum GamePhase {
-    Midgame,
-    Endgame,
-}
-
-impl GamePhase {
-    pub fn from_game_state(game_phase_value: i32) -> Self {
-        if game_phase_value < 24 {
-            GamePhase::Endgame
-        } else {
-            GamePhase::Midgame
-        }
-    }
-}
+use super::defs::NEIGHBOR_FILES;
+use super::defs::PLAYER_TERRITORY;
 
 // Similarly implement ENDGAME_PST tables for each piece...
 
@@ -776,43 +762,6 @@ pub fn generate_passed_pawns_bb() -> [[BB8<Square8>; 64]; 2] {
     all
 }
 
-const fn generate_neighbor_files() -> [BB8<Square8>; 8] {
-    let mut files = [BB8::new(0); 8];
-    let mut file = 0;
-    while file < 8 {
-        if file == 0 {
-            files[0] = FILE_BB[1];
-        } else if file == 7 {
-            files[7] = FILE_BB[6];
-        } else {
-            let left = FILE_BB[file as usize - 1];
-            let right = FILE_BB[file as usize + 1];
-            files[file] = BB8::new(left.0 | right.0);
-        }
-        file += 1;
-    }
-
-    files
-}
-
-pub const fn generate_player_sides() -> [BB8<Square8>; 2] {
-    let mut white = BB8::new(0);
-    let mut black = BB8::new(0);
-    let end = 4;
-    let mut current_rank = 0;
-    while current_rank < end {
-        white = BB8::new(white.0 | RANK_BB[current_rank as usize].0);
-        current_rank += 1;
-    }
-    let end = 8;
-    let mut current_rank = 4;
-    while current_rank < end {
-        black = BB8::new(black.0 | RANK_BB[current_rank as usize].0);
-        current_rank += 1;
-    }
-    [white, black]
-}
-
 pub fn generate_list_of_moves(legal_moves: HashMap<Square8, BB8<Square8>>) -> Vec<Move<Square8>> {
     let mut moves = vec![];
     for (sq, _moves) in legal_moves {
@@ -829,6 +778,3 @@ pub fn own_last_move(position: &P8<Square8, BB8<Square8>>) -> Option<Move<Square
     let m = position.move_history().last()?;
     Some(m.clone())
 }
-
-pub const NEIGHBOR_FILES: [BB8<Square8>; 8] = generate_neighbor_files();
-pub const PLAYER_TERRITORY: [BB8<Square8>; 2] = generate_player_sides();

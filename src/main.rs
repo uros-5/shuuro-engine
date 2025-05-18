@@ -1,5 +1,8 @@
 use engine8::search::uci_loop;
 
+pub mod engine;
+pub mod engine12;
+pub mod engine6;
 pub mod engine8;
 
 // fn main() {
