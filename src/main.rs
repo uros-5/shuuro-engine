@@ -1,4 +1,5 @@
-use engine8::search::uci_loop;
+use engine::Engine;
+use engine8::search::Engine8;
 
 pub mod engine;
 pub mod engine12;
@@ -19,5 +20,6 @@ fn main() {
     // dbg!(best_value);
     // dbg!(best_value.max(250));
 
-    uci_loop();
+    let engine = Engine8 {};
+    engine.uci_loop("4k3/4r3/8/8/6n1/8/5PPP/5BNK b - 1");
 }

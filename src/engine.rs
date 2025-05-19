@@ -5,7 +5,7 @@ use shuuro::{
     piece_type::PieceTypeIter,
     position::{Board, Placement, Play, Rules, Sfen},
 };
-use std::{cmp, collections::HashMap, hash::Hash};
+use std::{cmp, collections::HashMap, f32::INFINITY, fmt::Display, hash::Hash};
 
 // Game phase
 #[derive(Debug)]
@@ -24,7 +24,7 @@ impl GamePhase {
     }
 }
 
-pub trait EngineDefs<S: Square, B: BitBoard<S>> {
+pub trait EngineDefs<S: Square, B: BitBoard<S>, const FILE: usize> {
     fn get_piece_value(piece_type: PieceType, color: Color) -> i32;
 
     fn get_endgame_piece_value(piece_type: PieceType, color: Color) -> i32;
@@ -37,27 +37,21 @@ pub trait EngineDefs<S: Square, B: BitBoard<S>> {
 
     fn get_file(file: u8) -> B;
 
-    fn get_rank(file: u8) -> B;
+    fn get_rank(rank: u8) -> B;
 
     fn get_player_side(color: Color) -> B;
 
     fn phase_weight(piece_type: usize) -> i32;
+    fn all_files() -> [B; FILE];
 }
 
-pub trait Engine<
-    S,
-    B,
-    A,
-    P,
-    D,
-    const FILE: usize,
-    const BITBOARD_SIZE: usize,
-    const RANK_LIMIT: usize,
-> where
+pub trait Engine<S, B, A, P, D, const FILE: usize, const BITBOARD_SIZE: usize, const RANK: usize>
+where
     S: Square + Hash + Send + 'static,
     B: BitBoard<S>,
     A: Attacks<S, B>,
     P: Sized
+        + Display
         + Clone
         + Board<S, B, A>
         + Sfen<S, B, A>
@@ -66,9 +60,124 @@ pub trait Engine<
         + Rules<S, B, A>
         + Send
         + 'static,
-    D: EngineDefs<S, B>,
+    D: EngineDefs<S, B, FILE>,
 {
     fn init();
+
+    fn uci_loop(&self, sfen: &str) {
+        Self::init();
+
+        let mut position = P::new();
+        position.set_sfen(sfen).unwrap();
+
+        loop {
+            println!("{}", position);
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).unwrap();
+            let input = input.trim();
+
+            match input {
+                "isready" => println!("readyok"),
+                "quit" => break,
+                cmd if cmd.starts_with("position") => {
+                    // Parse position command
+                    println!("{position}");
+                }
+                cmd if cmd.starts_with("go") => {
+                    // Start search and return best move
+
+                    let best_move = self.alpha_beta_search(
+                        &position,
+                        3,
+                        -INFINITY as i32,
+                        INFINITY as i32,
+                        position.side_to_move(),
+                    );
+                    println!("bestmove {:?}", best_move.1.unwrap().to_fen());
+                }
+                cmd if cmd.starts_with("move") => {
+                    let mut mv = cmd.split_whitespace();
+                    mv.next();
+                    let Some(mv) = mv.next() else { continue };
+                    let Some(mv) = Move::<S>::from_sfen(mv) else {
+                        continue;
+                    };
+                    let mv = position.make_move(mv);
+                    dbg!(mv);
+                }
+                _ => (),
+            }
+        }
+    }
+    fn alpha_beta_search(
+        &self,
+        position: &P,
+        depth: i32,
+        mut alpha: i32,
+        mut beta: i32,
+        player: Color,
+    ) -> (i32, Option<Move<S>>) {
+        if depth == 0 {
+            return self.quiescence_search(position, alpha, beta, player);
+        }
+
+        // Generate moves first to detect mate/stalemate
+        let moves = position.legal_moves(player);
+
+        // Early termination for mate/stalemate
+        if moves.is_empty() {
+            let last_move = self.own_last_move(position);
+
+            return if position.in_check(player) {
+                // Checkmate - return a null move BUT with mate score
+                if player == Color::White {
+                    (i32::MIN, last_move)
+                } else {
+                    (i32::MAX, last_move)
+                }
+            } else {
+                // Stalemate
+                (0, last_move)
+            };
+        }
+
+        let mut best_move = None;
+
+        let mut best_score = if player == Color::White {
+            i32::MIN
+        } else {
+            i32::MAX
+        };
+        let moves = self.generate_list_of_moves(moves);
+
+        for mv in moves {
+            let mut new_board = position.clone();
+            let mv2 = mv.clone();
+            let _ = new_board.make_move(mv);
+            let (score, _) =
+                self.alpha_beta_search(&new_board, depth - 1, alpha, beta, player.flip());
+
+            if player == Color::White {
+                if score > best_score {
+                    best_score = score;
+                    best_move = Some(mv2); // Track the actual move leading to this score
+                    alpha = alpha.max(score);
+                }
+            } else {
+                if score < best_score {
+                    best_score = score;
+                    best_move = Some(mv2);
+                    beta = beta.min(score);
+                }
+            }
+
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        (best_score, best_move)
+    }
 
     fn count_material(&self, position: &P, color: Color) -> [u32; 9] {
         let mut piece_counts = [0; 9];
@@ -83,8 +192,6 @@ pub trait Engine<
         piece_counts
     }
 
-    fn midgame_min(&self) -> (i32, i32);
-
     fn calculate_game_phase(&self, piece_counts: &[[u32; 9]; 2]) -> i32 {
         let mut phase = 0;
         for color in piece_counts {
@@ -94,8 +201,6 @@ pub trait Engine<
         }
         cmp::min(phase, self.midgame_min().1)
     }
-
-    fn game_phase(&self, game_phase: i32) -> [[i32; 9]; 2];
 
     fn material_balance(&self, piece_counts: &[[u32; 9]; 2], game_phase: i32) -> i32 {
         let mut material = [0, 0];
@@ -152,7 +257,7 @@ pub trait Engine<
 
     fn count_doubled_pawns(&self, pawns: B) -> i32 {
         let mut count = 0;
-        for file in self.all_files() {
+        for file in D::all_files() {
             let bb = file & &pawns;
             count += bb.len() / 2;
         }
@@ -189,24 +294,12 @@ pub trait Engine<
             if (files & &enemy).is_empty() {
                 passed_pawn_count += 1;
 
-                passed_pawn_bonus += self.passed_pawn_bonus(pawn);
+                passed_pawn_bonus += self.passed_pawn_bonus(pawn, color);
             }
         }
 
         (passed_pawn_count * 10) + passed_pawn_bonus
     }
-
-    fn passed_pawn_bonus(&self, pawn: S) -> i32 {
-        match pawn.rank() {
-            6 => 50, // On 7th rank (about to promote)
-            5 => 30, // On 6th rank
-            4 => 15, // On 5th rank
-            3 => 8,  // On 4th rank
-            _ => 3,  // Less advanced but still passed
-        }
-    }
-
-    fn all_files(&self) -> [B; FILE];
 
     fn pawn_structure_evaluation(&self, position: &P) -> i32 {
         let mut score = 0;
@@ -295,12 +388,10 @@ pub trait Engine<
         }
     }
 
-    fn pawn_chain_file_bonus(&self, pawn: S) -> i32;
-
     fn pawn_storm(position: &P, color: Color, game_phase: i32) -> i32 {
         let king = position.find_king(color).unwrap();
         if color == Color::White {
-            if game_phase == 0 && king.file() > RANK_LIMIT as u8 - 2 {
+            if game_phase == 0 && king.file() > RANK as u8 - 2 {
                 return 25;
             }
         } else if color == Color::Black {
@@ -314,13 +405,13 @@ pub trait Engine<
         let mut ranks = B::empty();
         for i in 1..3 {
             let new_rank = king.file() as i8 + (new_rank * i);
-            if new_rank < 0 || new_rank > RANK_LIMIT as i8 {
+            if new_rank < 0 || new_rank > RANK as i8 {
                 continue;
             }
             ranks |= &D::get_rank(new_rank as u8);
         }
         let storm = enemy_pawns & &ranks;
-        storm.len() as i32 * RANK_LIMIT as i32
+        storm.len() as i32 * RANK as i32
     }
 
     fn king_behind_plinth(&self, position: &P, color: Color) -> bool {
@@ -439,7 +530,7 @@ pub trait Engine<
         let mut all = [[B::empty(); BITBOARD_SIZE]; 2];
         for color in [Color::White, Color::Black] {
             for sq in S::iter() {
-                if sq.rank() == 0 || sq.rank() == RANK_LIMIT as u8 {
+                if sq.rank() == 0 || sq.rank() == RANK as u8 {
                     continue;
                 }
                 let mut file = D::get_neighbor_files(sq.file()) | &D::get_file(sq.file());
@@ -731,4 +822,9 @@ pub trait Engine<
         let m = position.move_history().last()?;
         Some(m.clone())
     }
+
+    fn midgame_min(&self) -> (i32, i32);
+    fn passed_pawn_bonus(&self, pawn: S, color: Color) -> i32;
+
+    fn pawn_chain_file_bonus(&self, pawn: S) -> i32;
 }
