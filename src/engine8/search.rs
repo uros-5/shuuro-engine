@@ -103,9 +103,9 @@ impl
 
     fn pawn_chain_file_bonus(&self, pawn: Square8) -> i32 {
         match pawn.file() {
-            3 | 4 => 5, // Center files
-            2 | 5 => 4, // Semi-center
-            1 | 6 => 3, // Flank
+            2 | 3 => 5, // Center files
+            1 | 4 => 4, // Semi-center
+            0 | 5 => 3, // Flank
             _ => 2,
         }
     }

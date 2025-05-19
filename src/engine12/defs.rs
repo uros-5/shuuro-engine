@@ -400,6 +400,18 @@ pub const PST_ENDGAME: [[[i32; 144]; 9]; 2] = [
 pub const NEIGHBOR_FILES: [BB12<Square12>; 12] = generate_neighbor_files();
 pub const PLAYER_TERRITORY: [BB12<Square12>; 2] = generate_player_sides();
 
+pub const PHASE_WEIGHTS: [i32; 9] = [
+    0, // King
+    4, // Queen
+    2, // Rook
+    2, // Bishop
+    3, // Knight
+    0, // Pawn
+    3, // Chancellor
+    2, // Archbishop
+    1, // Giraffe
+];
+
 const fn generate_neighbor_files() -> [BB12<Square12>; 12] {
     let mut files = [BB12::new(0, 0); 12];
     let mut file = 0;
