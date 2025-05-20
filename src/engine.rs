@@ -1,5 +1,5 @@
 use shuuro::{
-    Color, Move, PieceType, Square,
+    Color, Move, Piece, PieceType, Square,
     attacks::Attacks,
     bitboard::BitBoard,
     piece_type::PieceTypeIter,
@@ -88,12 +88,13 @@ where
 
                     let best_move = self.alpha_beta_search(
                         &position,
-                        3,
+                        5,
                         -INFINITY as i32,
                         INFINITY as i32,
                         position.side_to_move(),
                     );
                     println!("bestmove {:?}", best_move.1.unwrap().to_fen());
+                    println!("{}", best_move.0);
                 }
                 cmd if cmd.starts_with("move") => {
                     let mut mv = cmd.split_whitespace();
@@ -109,6 +110,7 @@ where
             }
         }
     }
+
     fn alpha_beta_search(
         &self,
         position: &P,
@@ -118,7 +120,12 @@ where
         player: Color,
     ) -> (i32, Option<Move<S>>) {
         if depth == 0 {
-            return self.quiescence_search(position, alpha, beta, player);
+            let a = self.quiescence_search(position, alpha, beta, player);
+            // a.1.clone().is_some_and(|x| {
+            //     println!("{}", x.to_fen());
+            //     false
+            // });
+            return a;
         }
 
         // Generate moves first to detect mate/stalemate
@@ -171,12 +178,35 @@ where
                 }
             }
 
-            if alpha >= beta {
+            if beta <= alpha {
                 break;
             }
         }
 
         (best_score, best_move)
+    }
+
+    fn move_score(&self, from: S, to: S, position: &P) -> i32 {
+        // MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+
+        let Some(from) = position.piece_at(from) else {
+            return 0;
+        };
+        let Some(to) = position.piece_at(to) else {
+            return 0;
+        };
+
+        10 * D::get_piece_value(to.piece_type, to.color)
+            - D::get_piece_value(from.piece_type, from.color)
+
+        // Killer moves, history heuristic, etc.
+        // 0
+    }
+
+    fn order_moves(&self, moves: &mut Vec<(Move<S>, i32)>) {
+        moves.sort_by(|a, b| {
+            b.1.cmp(&a.1) // Sort descending
+        });
     }
 
     fn count_material(&self, position: &P, color: Color) -> [u32; 9] {
@@ -244,6 +274,9 @@ where
             };
             let player = position.player_bb(color);
             for pt in PieceTypeIter::default() {
+                if pt == PieceType::Plinth {
+                    continue;
+                }
                 let bb = position.type_bb(&pt) & &player;
                 for sq in bb {
                     let value = pst(sq, pt, color);
@@ -766,19 +799,26 @@ where
 
         let legal_moves = position.legal_moves(position.side_to_move());
         let enemy_pieces = position.player_bb(position.side_to_move().flip());
+        let enemy_moves = position.enemy_moves(position.side_to_move());
         let mut captures = vec![];
         for (piece, moves) in legal_moves {
             let _captures = moves & &enemy_pieces;
+            if (enemy_moves & &_captures).is_any() {
+                continue;
+            }
             for capture in _captures {
                 let to = capture;
+                let score = self.move_score(piece, to, position);
                 let m = Move::new(piece, to);
-                captures.push(m);
+                captures.push((m, score));
             }
         }
 
+        self.order_moves(&mut captures);
+
         for mv in captures {
             let mut new_board = position.clone();
-            let _ = new_board.make_move(mv);
+            let _ = new_board.make_move(mv.0);
             let eval = self.quiescence_search(&new_board, alpha, beta, player.flip());
 
             if player == Color::White {
