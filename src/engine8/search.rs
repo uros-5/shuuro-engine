@@ -6,6 +6,7 @@ use crate::engine8::defs::PIECE_VALUES;
 use crate::engine8::defs::PST;
 use crate::engine8::defs::PST_ENDGAME;
 
+use shuuro::Move;
 use shuuro::{
     Color, PieceType, Square,
     attacks::Attacks,
@@ -69,7 +70,10 @@ impl EngineDefs<Square8, BB8<Square8>, 8> for Defs8 {
     }
 }
 
-pub struct Engine8 {}
+pub struct Engine8 {
+    pub last_move: Option<Move<Square8>>,
+    pub best_move: Option<Move<Square8>>,
+}
 
 impl
     Engine<
@@ -108,5 +112,24 @@ impl
             0 | 5 => 3, // Flank
             _ => 2,
         }
+    }
+
+    fn update_last_move(&mut self, mv: shuuro::Move<Square8>) {
+        self.last_move = Some(mv)
+    }
+
+    fn update_best_move(&mut self, mv: shuuro::Move<Square8>) {
+        self.best_move = Some(mv);
+    }
+
+    fn new() -> Self {
+        Self {
+            last_move: None,
+            best_move: None,
+        }
+    }
+
+    fn get_best_move(&self) -> Option<Move<Square8>> {
+        self.best_move.clone()
     }
 }

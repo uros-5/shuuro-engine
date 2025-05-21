@@ -1,7 +1,5 @@
 use engine::Engine;
-use engine6::search::Engine6;
 use engine8::search::Engine8;
-use engine12::search::Engine12;
 
 pub mod engine;
 pub mod engine12;
@@ -22,7 +20,7 @@ fn main() {
     // dbg!(best_value);
     // dbg!(best_value.max(250));
 
-    let engine = Engine12 {};
-    // engine.uci_loop("4k3/4r3/8/8/6n1/4B1/5PPP/5BNK b - 1");
-    engine.uci_loop("10k1/12/10n1/12/12/12/12/12/10n1/12/9PPP/9BNK b - 1");
+    let mut engine = Engine8::new();
+    engine.uci_loop("4k3/4r3/8/8/6n1/4B1/5PPP/5BNK b - 1");
+    // engine.uci_loop("10k1/12/10n1/12/12/12/12/12/10n1/12/9_._.P/8BBNK b - 1");
 }

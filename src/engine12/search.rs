@@ -6,6 +6,7 @@ use crate::engine12::defs::PIECE_VALUES;
 use crate::engine12::defs::PST;
 use crate::engine12::defs::PST_ENDGAME;
 
+use shuuro::Move;
 use shuuro::{
     Color, PieceType, Square,
     attacks::Attacks,
@@ -69,7 +70,10 @@ impl EngineDefs<Square12, BB12<Square12>, 12> for Defs12 {
     }
 }
 
-pub struct Engine12 {}
+pub struct Engine12 {
+    pub last_move: Option<Move<Square12>>,
+    pub best_move: Option<Move<Square12>>,
+}
 
 impl
     Engine<
@@ -108,5 +112,24 @@ impl
             2 | 10 => 3, // Flank
             _ => 2,
         }
+    }
+
+    fn update_last_move(&mut self, mv: shuuro::Move<Square12>) {
+        self.last_move = Some(mv);
+    }
+
+    fn update_best_move(&mut self, mv: shuuro::Move<Square12>) {
+        self.best_move = Some(mv);
+    }
+
+    fn new() -> Self {
+        Self {
+            last_move: None,
+            best_move: None,
+        }
+    }
+
+    fn get_best_move(&self) -> Option<Move<Square12>> {
+        self.best_move.clone()
     }
 }
