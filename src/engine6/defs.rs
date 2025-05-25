@@ -6,20 +6,14 @@ use shuuro::shuuro6::{
 
 // Midgame values
 #[rustfmt::skip]
-pub const PIECE_VALUES: [[i32; 9]; 2] = [
-    // White pieces (King, Queen, Rook, Bishop, Knight, Pawn, Chancellor, Archbishop, Giraffe)
-    [0, 750, 350, 250, 200, 60, 500, 400, 150],
-    // Black pieces (asymmetric for variety)
-    [0, 730, 340, 240, 190, 65, 480, 390, 160],
+pub const PIECE_VALUES: [i32; 9]  = [
+    0, 750, 350, 250, 200, 60, 500, 400, 150,
 ];
 
 // Endgame values
 #[rustfmt::skip]
-pub const ENDGAME_PIECE_VALUES: [[i32; 9]; 2] = [
-    // White
-    [0, 800, 400, 270, 220, 70, 550, 450, 120],
-    // Black
-    [0, 780, 390, 260, 210, 75, 530, 440, 130],
+pub const ENDGAME_PIECE_VALUES: [i32; 9] = [
+    0, 800, 400, 270, 220, 70, 550, 450, 120
 ];
 
 // Midgame Piece-Square Tables
@@ -172,7 +166,7 @@ const fn create_pst_endgame() -> [[[i32; 36]; 9]; 2] {
 
 #[rustfmt::skip]
 pub const PHASE_WEIGHTS: [i32; 9] = [
-    0, // King
+    1, // King
     4, // Queen
     2, // Rook
     1, // Bishop

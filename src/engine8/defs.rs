@@ -6,9 +6,8 @@ use shuuro::shuuro8::{
 
 // Piece values - reordered and expanded
 #[rustfmt::skip]
-pub const PIECE_VALUES: [[i32; 9]; 2] = [
-    // Midgame values - White
-    [
+pub const PIECE_VALUES: [i32; 9] = [
+    
         0,    // King (no value)
         1025, // Queen
         477,  // Rook
@@ -17,49 +16,24 @@ pub const PIECE_VALUES: [[i32; 9]; 2] = [
         82,   // Pawn
         800,  // Chancellor (Rook + Knight)
         700,  // Archbishop (Bishop + Knight)
-        300,  // Giraffe (arbitrary value)
-    ],
-    // Midgame values - Black
-    [
-        0,   // King
-        936, // Queen
-        512, // Rook
-        297, // Bishop
-        281, // Knight
-        94,  // Pawn
-        750, // Chancellor
-        650, // Archbishop
-        280, // Giraffe
-    ],
+        150,  // Giraffe (arbitrary value)
+    
 ];
 
 // Endgame values
 #[rustfmt::skip]
-pub const ENDGAME_PIECE_VALUES: [[i32; 9]; 2] = [
+pub const ENDGAME_PIECE_VALUES: [i32; 9] = [
     // Endgame values - White
-    [
+    
         0,   // King
         936, // Queen
         512, // Rook
         297, // Bishop
         281, // Knight
-        94,  // Pawn
+        150,  // Pawn
         750, // Chancellor
         650, // Archbishop
-        280, // Giraffe
-    ],
-    // Endgame values - Black
-    [
-        0,    // King
-        1025, // Queen
-        477,  // Rook
-        365,  // Bishop
-        337,  // Knight
-        82,   // Pawn
-        800,  // Chancellor
-        700,  // Archbishop
-        300,  // Giraffe
-    ],
+        140, // Giraffe
 ];
 
 #[rustfmt::skip]
@@ -232,7 +206,7 @@ pub const PST: [[[i32; 64]; 9]; 2] = pst();
 pub const PST_ENDGAME: [[[i32; 64]; 9]; 2] = pst_endgame();
 
 #[rustfmt::skip]
-pub const PHASE_WEIGHTS: [i32; 9] = [0, 4, 2, 1, 1, 0, 3, 2, 1];
+pub const PHASE_WEIGHTS: [i32; 9] = [1, 4, 2, 1, 2, 0, 3, 2, 1];
 #[rustfmt::skip]
 pub const NEIGHBOR_FILES: [BB8<Square8>; 8] = generate_neighbor_files();
 #[rustfmt::skip]

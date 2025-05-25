@@ -1,5 +1,5 @@
 use shuuro::{
-    Color, Move, PieceType, Square,
+    Color, Move, Piece, PieceType, Square,
     attacks::Attacks,
     bitboard::BitBoard,
     piece_type::PieceTypeIter,
@@ -24,10 +24,10 @@ impl GamePhase {
     }
 }
 
-pub trait EngineDefs<S: Square, B: BitBoard<S>, const FILE: usize> {
-    fn get_piece_value(piece_type: PieceType, color: Color) -> i32;
+pub trait EngineDefs<S: Square, B: BitBoard<S>, const LEN: usize> {
+    fn get_piece_value(piece_type: PieceType) -> i32;
 
-    fn get_endgame_piece_value(piece_type: PieceType, color: Color) -> i32;
+    fn get_endgame_piece_value(piece_type: PieceType) -> i32;
 
     fn get_pst_value(square: S, piece_type: PieceType, color: Color) -> i32;
 
@@ -42,10 +42,54 @@ pub trait EngineDefs<S: Square, B: BitBoard<S>, const FILE: usize> {
     fn get_player_side(color: Color) -> B;
 
     fn phase_weight(piece_type: usize) -> i32;
-    fn all_files() -> [B; FILE];
+    fn all_files() -> [B; LEN];
 }
 
-pub trait Engine<S, B, A, P, D, const FILE: usize, const BITBOARD_SIZE: usize, const RANK: usize>
+pub enum EngineMove<S: Square + Hash + Send + 'static> {
+    Score(i32),
+    BestMove { score: i32, mv: Move<S> },
+}
+
+impl<S: Square + Hash + Send + 'static> EngineMove<S> {
+    pub fn score(&self) -> i32 {
+        match &self {
+            EngineMove::Score(score) => *score,
+            EngineMove::BestMove { score, .. } => *score,
+        }
+    }
+
+    pub fn best_move<B, A, P>(self, position: &P) -> Option<Move<S>>
+    where
+        B: BitBoard<S>,
+        A: Attacks<S, B>,
+        P: Sized
+            + Display
+            + Clone
+            + Board<S, B, A>
+            + Sfen<S, B, A>
+            + Placement<S, B, A>
+            + Play<S, B, A>
+            + Rules<S, B, A>
+            + Send
+            + 'static,
+    {
+        let EngineMove::BestMove { mv, .. } = self else {
+            let lm = position.get_legal_moves();
+            for i in lm {
+                let from = i.0;
+                for target in *i.1 {
+                    let mv = Move::new(*from, target);
+                    return Some(mv);
+                }
+                return None;
+            }
+            return None;
+        };
+        Some(mv)
+    }
+}
+
+pub trait Engine<S, B, A, P, D, const LEN: usize, const BITBOARD_SIZE: usize, const RANK: usize>
 where
     S: Square + Hash + Send + 'static,
     B: BitBoard<S>,
@@ -60,12 +104,12 @@ where
         + Rules<S, B, A>
         + Send
         + 'static,
-    D: EngineDefs<S, B, FILE>,
+    D: EngineDefs<S, B, LEN>,
 {
     fn new() -> Self;
     fn init();
 
-    fn uci_loop(&mut self, sfen: &str) {
+    fn uci_loop(&self, sfen: &str) {
         Self::init();
 
         let mut position = P::new();
@@ -87,15 +131,16 @@ where
                 cmd if cmd.starts_with("go") => {
                     // Start search and return best move
 
-                    let best_move = self.alpha_beta_search2(
+                    let best_move = self.alpha_beta_search(
                         &position,
-                        0,
+                        4,
                         -INFINITY as i32,
                         INFINITY as i32,
-                        position.side_to_move(),
+                        position.side_to_move() == Color::White,
+                        true,
                     );
-                    println!("bestmove {:?}", self.get_best_move());
-                    println!("bestmove {:?}", best_move);
+                    dbg!(&best_move.score());
+                    best_move.best_move(&position);
                 }
                 cmd if cmd.starts_with("move") => {
                     let mut mv = cmd.split_whitespace();
@@ -104,176 +149,14 @@ where
                     let Some(mv) = Move::<S>::from_sfen(mv) else {
                         continue;
                     };
-                    let mv = position.make_move(mv);
-                    let _ = dbg!(mv);
+                    let _ = position.make_move(mv);
                 }
                 _ => (),
             }
         }
     }
 
-    fn alpha_beta_search2(
-        &mut self,
-        position: &P,
-        depth: i32,
-        mut alpha: i32,
-        mut beta: i32,
-        player: Color,
-    ) -> i32 {
-        if depth == 0 {
-            let m = self.quiescence_search(position, alpha, beta, player);
-            if let Some(m) = m.1 {
-                self.update_best_move(m);
-            }
-            return m.0;
-        }
-        let moves = position.legal_moves(player);
-
-        if moves.is_empty() {
-            return if position.in_check(player) {
-                // Checkmate - return a null move BUT with mate score
-                if player == Color::White {
-                    i32::MIN
-                } else {
-                    i32::MAX
-                }
-            } else {
-                // Stalemate
-                0
-            };
-        }
-
-        let moves = self.generate_list_of_moves(moves);
-
-        if player == Color::White {
-            let mut best_value = i32::MIN;
-
-            for mov in moves {
-                // Make the move
-                let mut position2 = position.clone();
-                // self.update_last_move(mov.clone());
-                let best_move = mov.clone();
-                let _ = position2.make_move(mov);
-
-                // Recursively search
-                let value = self.alpha_beta_search2(position, depth - 1, alpha, beta, Color::Black);
-
-                // Update best value
-                best_value = best_value.max(value);
-
-                // Update alpha
-                alpha = alpha.max(best_value);
-
-                // Alpha-beta pruning
-                if alpha >= beta {
-                    self.update_best_move(best_move);
-                    break; // Beta cutoff
-                }
-            }
-            best_value
-        } else {
-            let mut best_value = i32::MAX;
-
-            for mov in moves {
-                // Make the move
-                let mut position2 = position.clone();
-                // self.update_last_move(mov.clone());
-                let best_move = mov.clone();
-                let _ = position2.make_move(mov);
-
-                // Recursively search
-                let value = self.alpha_beta_search2(position, depth - 1, alpha, beta, Color::White);
-
-                // Update best value
-                best_value = best_value.min(value);
-
-                // Update beta
-                beta = beta.min(best_value);
-
-                // Alpha-beta pruning
-                if beta <= alpha {
-                    self.update_best_move(best_move);
-                    break; // Alpha cutoff
-                }
-            }
-            best_value
-        }
-    }
-
-    fn update_last_move(&mut self, mv: Move<S>);
-    fn update_best_move(&mut self, mv: Move<S>);
     fn get_best_move(&self) -> Option<Move<S>>;
-
-    // fn alpha_beta_search(
-    //     &self,
-    //     position: &P,
-    //     depth: i32,
-    //     mut alpha: i32,
-    //     mut beta: i32,
-    //     player: Color,
-    // ) -> (i32, Option<Move<S>>) {
-    //     if depth == 0 {
-    //         return self.quiescence_search(position, alpha, beta, player);
-    //     }
-
-    //     // Generate moves first to detect mate/stalemate
-    //     let moves = position.legal_moves(player);
-
-    //     // Early termination for mate/stalemate
-    //     if moves.is_empty() {
-    //         let last_move = self.own_last_move(position);
-
-    //         return if position.in_check(player) {
-    //             // Checkmate - return a null move BUT with mate score
-    //             if player == Color::White {
-    //                 (i32::MIN, last_move)
-    //             } else {
-    //                 (i32::MAX, last_move)
-    //             }
-    //         } else {
-    //             // Stalemate
-    //             (0, last_move)
-    //         };
-    //     }
-
-    //     let mut best_move = None;
-
-    //     let mut best_score = if player == Color::White {
-    //         i32::MIN
-    //     } else {
-    //         i32::MAX
-    //     };
-    //     let moves = self.generate_list_of_moves(moves);
-
-    //     for mv in moves {
-    //         let mut new_board = position.clone();
-    //         let mv2 = mv.clone();
-    //         let _ = new_board.make_move(mv);
-    //         let (score, _) =
-    //             self.alpha_beta_search(&new_board, depth - 1, alpha, beta, player.flip());
-
-    //         if player == Color::White {
-    //             if score > best_score {
-    //                 best_score = score;
-    //                 best_move = Some(mv2); // Track the actual move leading to this score
-    //                 alpha = alpha.max(score);
-    //             }
-    //         } else {
-    //             if score < best_score {
-    //                 best_score = score;
-    //                 best_move = Some(mv2);
-    //                 beta = beta.min(score);
-    //             }
-    //         }
-
-    //         if beta <= alpha {
-    //             break;
-    //         }
-    //     }
-    //     // });
-
-    //     (best_score, best_move)
-    // }
 
     fn move_score(&self, from: S, to: S, position: &P) -> i32 {
         // MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
@@ -285,8 +168,7 @@ where
             return 0;
         };
 
-        10 * D::get_piece_value(to.piece_type, to.color)
-            - D::get_piece_value(from.piece_type, from.color)
+        10 * D::get_piece_value(to.piece_type) - D::get_piece_value(from.piece_type)
 
         // Killer moves, history heuristic, etc.
         // 0
@@ -336,8 +218,7 @@ where
                     break;
                 }
 
-                let value = game_phase(pt, color);
-                piece_counts[color.index()][pt.index()] as i32;
+                let value = game_phase(pt) * piece_counts[color.index()][pt.index()] as i32;
                 material[color.index()] += value;
             }
         }
@@ -423,7 +304,7 @@ where
         (passed_pawn_count * 10) + passed_pawn_bonus
     }
 
-    fn pawn_structure_evaluation(&self, position: &P) -> i32 {
+    fn pawn_structure_evaluation(&self, position: &P, game_phase: i32) -> i32 {
         let mut score = 0;
         let pawns = [
             (position.player_bb(Color::White) & &position.type_bb(&PieceType::Pawn)),
@@ -457,6 +338,9 @@ where
         // Pawn chains bonus
         score += 15 * self.count_pawn_chains(pawns[0], position, Color::White);
         score -= 15 * self.count_pawn_chains(pawns[1], position, Color::Black);
+
+        score += self.pawn_storm(position, Color::White, game_phase);
+        score -= self.pawn_storm(position, Color::Black, game_phase);
 
         score
     }
@@ -510,7 +394,7 @@ where
         }
     }
 
-    fn pawn_storm(position: &P, color: Color, game_phase: i32) -> i32 {
+    fn pawn_storm(&self, position: &P, color: Color, game_phase: i32) -> i32 {
         let king = position.find_king(color).unwrap();
         if color == Color::White {
             if game_phase == 0 && king.file() > RANK as u8 - 2 {
@@ -518,7 +402,7 @@ where
             }
         } else if color == Color::Black {
             if game_phase == 0 && king.file() < 2 {
-                return 25;
+                return -25;
             }
         }
         let enemy_pawns = position.player_bb(color.flip()) & &position.type_bb(&PieceType::Pawn);
@@ -709,8 +593,8 @@ where
         (mobility[0] - mobility[1]) / 2
     }
 
-    fn king_safety_evaluation(&self, position: &P, game_phase: i32) -> i32 {
-        if game_phase <= self.midgame_min().0 {
+    fn king_safety_evaluation(&self, position: &P, _game_phase: i32) -> i32 {
+        if _game_phase <= self.midgame_min().0 {
             return 0;
         }
 
@@ -725,20 +609,16 @@ where
     }
 
     fn other_positional_factors(&self, position: &P) -> i32 {
-        let mut score = 0;
-
-        let white_bishops =
-            position.player_bb(Color::White) & &position.type_bb(&PieceType::Bishop);
-        if white_bishops.len() >= 2 {
-            score += 30;
-        }
-        let black_bishops =
-            position.player_bb(Color::Black) & &position.type_bb(&PieceType::Bishop);
-        if black_bishops.len() >= 2 {
-            score -= 30;
-        }
-
+        let mut scores = [0, 0];
         for color in [Color::White, Color::Black] {
+            let mut score = 0;
+
+            let bishops = position.player_bb(color) & &position.type_bb(&PieceType::Bishop);
+            if bishops.len() >= 2 {
+                score += 30;
+            }
+            score += position.player_bb(color).len() as i32 * 10;
+
             let rooks = position.player_bb(color) & &position.type_bb(&PieceType::Rook);
             for rook in rooks {
                 let file = D::get_file(rook.file());
@@ -748,39 +628,73 @@ where
                 let is_open = (file & &pawns).is_empty();
                 let is_semi_open = ((file & &their_pawns) & &!my_pawns).is_any();
 
-                match (is_open, is_semi_open, color) {
-                    (true, _, Color::White) => score += 20, // Open file (strongest)
-                    (_, true, Color::White) => score += 10, // Semi-open (still good)
-                    (true, _, Color::Black) => score -= 20, // Black benefits similarly
-                    (_, true, Color::Black) => score -= 10,
+                match (is_open, is_semi_open) {
+                    (true, _) => score += 20, // Open file (strongest)
+                    (_, true) => score += 10, // Semi-open (still good)
                     _ => (),
                 };
             }
 
-            let knights = position.player_bb(color) & &position.type_bb(&PieceType::Knight);
-            for knight in knights {
-                let outpost = self.is_outpost(knight, color, position);
-                if outpost {
-                    match color {
-                        Color::White => score += 25,
-                        Color::Black => score -= 25,
-                        _ => (),
+            let enemy_moves = position.enemy_moves(color.flip());
+
+            for pt in PieceTypeIter::default() {
+                if pt == PieceType::Plinth {
+                    break;
+                }
+                let pieces = position.player_bb(color) & &position.type_bb(&pt);
+                for sq in pieces {
+                    let outpost = self.is_outpost(sq, color, position, pt == PieceType::Pawn);
+                    match outpost {
+                        Outpost::No => {}
+                        Outpost::Yes { protected } => {
+                            if protected == false {
+                                let pawn_penalty = if pt == PieceType::Pawn { 20 } else { 0 };
+                                score -= 40 - pawn_penalty;
+                            } else {
+                                score += 25;
+                            }
+                        }
                     };
+
+                    if (enemy_moves & &sq).is_any() {
+                        score -= D::get_piece_value(pt);
+                    }
+
+                    let piece = Piece {
+                        piece_type: pt,
+                        color,
+                    };
+                    let moves = position.get_moves(&sq, &piece, position.occupied_bb());
+                    let bonus = self.moves_in_enemy_territory(moves, sq, piece);
+                    score += bonus;
                 }
             }
+            scores[color.index()] = score;
         }
-
-        score
+        scores[0] - scores[1]
     }
 
-    fn is_outpost(&self, sq: S, color: Color, position: &P) -> bool {
+    fn moves_in_enemy_territory(&self, moves: B, sq: S, piece: Piece) -> i32 {
+        let moves_in = D::get_player_side(piece.color.flip()) & &moves;
+        let weight = D::phase_weight(piece.piece_type.index());
+        let color = { if piece.color == Color::White { 1 } else { -1 } };
+        let in_enemy = D::get_player_side(piece.color.flip()) & &sq;
+        let mut bonus = 0;
+        if in_enemy.is_any() {
+            bonus += 10 * color;
+        }
+
+        ((moves_in.len() as i32 * weight) * color) + bonus
+    }
+
+    fn is_outpost(&self, sq: S, color: Color, position: &P, is_pawn: bool) -> Outpost {
         let in_enemy_territory = match color {
-            Color::White => (D::get_player_side(Color::White) & &sq).is_any(),
-            Color::Black => (D::get_player_side(Color::Black) & &sq).is_any(),
+            Color::White => (D::get_player_side(Color::Black) & &sq).is_any(),
+            Color::Black => (D::get_player_side(Color::White) & &sq).is_any(),
             Color::NoColor => false,
         };
         if !in_enemy_territory {
-            return false;
+            return Outpost::No;
         }
 
         let pawns = position.type_bb(&PieceType::Pawn);
@@ -789,10 +703,14 @@ where
 
         let attacks = A::get_non_sliding_attacks(PieceType::Pawn, &sq, color.flip(), B::empty());
         let protected = (attacks & &my_pawns).is_any();
+        if !is_pawn {
+            return Outpost::Yes { protected };
+        }
         let attacks = A::get_non_sliding_attacks(PieceType::Pawn, &sq, color, B::empty());
         let attackable = (attacks & &enemy_pawns).is_any();
-
-        protected && !attackable
+        Outpost::Yes {
+            protected: protected && !attackable,
+        }
     }
 
     fn king_shelter_penalty(&self, position: &P, color: Color) -> i32 {
@@ -829,11 +747,19 @@ where
         penalty
     }
 
-    fn evaluate_position(&self, position: &P, color: Color) -> i32 {
+    fn evaluate_position(&self, position: &P, maximizing_player: bool) -> i32 {
         let mut eval = 0;
 
-        let white_material = self.count_material(position, color);
-        let black_material = self.count_material(position, color.flip());
+        let player = {
+            if maximizing_player {
+                Color::White
+            } else {
+                Color::Black
+            }
+        };
+
+        let white_material = self.count_material(position, player);
+        let black_material = self.count_material(position, player.flip());
         let piece_counts = [white_material, black_material];
         let game_phase = self.calculate_game_phase(&piece_counts);
 
@@ -844,7 +770,7 @@ where
         eval += self.pst_evaluation(position, game_phase);
 
         // Pawn structure
-        eval += self.pawn_structure_evaluation(position);
+        eval += self.pawn_structure_evaluation(position, game_phase);
 
         // Mobility
         eval += self.mobility_evaluation(position, game_phase);
@@ -869,20 +795,29 @@ where
         position: &P,
         mut alpha: i32,
         mut beta: i32,
-        player: Color,
-    ) -> (i32, Option<Move<S>>) {
-        let stand_pat = self.evaluate_position(position, position.side_to_move());
+        maximizing_player: bool,
+    ) -> i32 {
+        if position.is_checkmate(position.side_to_move()) {
+            // Checkmate - return a null move BUT with mate score
+            if maximizing_player {
+                return i32::MIN;
+            } else {
+                return i32::MAX;
+            }
+        }
 
-        if player == Color::White {
-            if stand_pat >= beta {
-                return (beta, None);
+        let static_eval = self.evaluate_position(position, maximizing_player);
+
+        if maximizing_player {
+            if static_eval >= beta {
+                return beta;
             }
-            alpha = alpha.max(stand_pat);
+            alpha = alpha.max(static_eval);
         } else {
-            if stand_pat <= alpha {
-                return (alpha, None);
+            if static_eval <= alpha {
+                return alpha;
             }
-            beta = beta.min(stand_pat);
+            beta = beta.min(static_eval);
         }
 
         let legal_moves = position.legal_moves(position.side_to_move());
@@ -892,9 +827,9 @@ where
         for (piece, moves) in legal_moves {
             let _captures = moves & &enemy_pieces;
             // println!("{}", enemy_moves & &_captures);
-            // if (enemy_moves & &_captures).is_any() {
-            //     continue;
-            // }
+            if (enemy_moves & &_captures).is_any() {
+                continue;
+            }
             for capture in _captures {
                 let to = capture;
                 let score = self.move_score(piece, to, position);
@@ -904,33 +839,132 @@ where
         }
 
         self.order_moves(&mut captures);
-        let mut best_move = None;
+        let state = position.get_sfen_history().first();
+        let state = (state.0, state.1);
 
         for mv in captures {
             let mut new_board = position.clone();
-            let z = mv.0.clone();
-            best_move = Some(z);
             let _ = new_board.make_move(mv.0);
-            let eval = self.quiescence_search(&new_board, alpha, beta, player.flip());
+            let last_state = new_board.get_sfen_history().first();
+            let last_state = (last_state.0, last_state.1);
+            if state == last_state {
+                break;
+            }
+            let eval = self.quiescence_search(&new_board, alpha, beta, maximizing_player);
 
-            if player == Color::White {
-                alpha = alpha.max(eval.0);
+            if maximizing_player {
+                alpha = alpha.max(eval);
                 if alpha >= beta {
                     break;
                 }
             } else {
-                beta = beta.min(eval.0);
+                beta = beta.min(eval);
                 if beta <= alpha {
                     break;
                 }
             }
         }
+        if maximizing_player { alpha } else { beta }
+    }
 
-        if player == Color::White {
-            (alpha, best_move)
-        } else {
-            (beta, best_move)
+    fn alpha_beta_search(
+        &self,
+        position: &P,
+        depth: i32,
+        mut alpha: i32,
+        mut beta: i32,
+        maximizing_player: bool,
+        is_first: bool,
+    ) -> EngineMove<S> {
+        if depth == 0 {
+            return EngineMove::Score(self.quiescence_search(
+                position,
+                alpha,
+                beta,
+                maximizing_player,
+            ));
+        };
+
+        let moves = position.legal_moves(position.side_to_move());
+        if moves.is_empty() {
+            return if position.in_check(position.side_to_move()) {
+                // Checkmate
+                if maximizing_player {
+                    EngineMove::Score(i32::MIN)
+                } else {
+                    EngineMove::Score(i32::MAX)
+                }
+            } else {
+                EngineMove::Score(0)
+            };
         }
+        let moves = self.generate_list_of_moves(moves);
+        let mut best_move = None;
+        let best_score;
+
+        if maximizing_player {
+            let mut max_eval = i32::MIN;
+            for mv in moves {
+                let mut new_board = position.clone();
+                let mv3 = mv.clone();
+                let _ = new_board.make_move(mv);
+                if best_move == None {
+                    best_move = Some(mv3.clone());
+                }
+                let eval = self.alpha_beta_search(&new_board, depth - 1, alpha, beta, false, false);
+                let score = eval.score();
+                max_eval = max_eval.max(score);
+                if is_first {
+                    if score > alpha {
+                        best_move = Some(mv3.clone());
+                    }
+                }
+                alpha = alpha.max(score);
+                if is_first {}
+                if beta <= alpha {
+                    best_move = Some(mv3.clone());
+                    break; // Beta cutoff
+                }
+            }
+            best_score = max_eval;
+        } else {
+            let mut min_eval = i32::MAX;
+            for mv in moves {
+                let mut new_board = position.clone();
+                let mv3 = mv.clone();
+                let _ = new_board.make_move(mv);
+                if best_move == None {
+                    best_move = Some(mv3.clone());
+                }
+                let eval = self.alpha_beta_search(&new_board, depth - 1, alpha, beta, true, false);
+                let score = eval.score();
+
+                if is_first {
+                    if score < beta {
+                        best_move = Some(mv3.clone());
+                    }
+                }
+
+                min_eval = min_eval.min(score);
+
+                beta = beta.min(score);
+                if beta <= alpha {
+                    best_move = Some(mv3.clone());
+                    break; // Alpha cutoff
+                }
+            }
+            best_score = min_eval;
+        }
+
+        if is_first {
+            if let Some(mv) = best_move {
+                return EngineMove::BestMove {
+                    score: best_score,
+                    mv,
+                };
+            }
+        }
+        return EngineMove::Score(best_score);
     }
 
     fn evaluate(&self, position: &P) -> i16 {
@@ -957,4 +991,28 @@ where
     fn passed_pawn_bonus(&self, pawn: S, color: Color) -> i32;
 
     fn pawn_chain_file_bonus(&self, pawn: S) -> i32;
+
+    fn first_position(&self, position: &P, mv: &str, static_eval: i32) {
+        let first = position
+            .move_history()
+            .first()
+            .is_some_and(|x| x.to_fen() == mv);
+        if first {
+            println!("{position}");
+            self.check_history(position);
+            println!("eval, {}", static_eval);
+        }
+    }
+
+    fn check_history(&self, position: &P) {
+        for m in position.move_history() {
+            println!("{}", m.to_fen());
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Outpost {
+    No,
+    Yes { protected: bool },
 }

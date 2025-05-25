@@ -5,7 +5,7 @@ use shuuro::shuuro12::{
 };
 
 #[rustfmt::skip]
-pub const PIECE_VALUES: [[i32; 9]; 2] = [
+pub const PIECE_VALUES: [i32; 9]= 
     [
         0,    // King (effectively infinite, but using a large number)
         1100, // Queen
@@ -16,24 +16,11 @@ pub const PIECE_VALUES: [[i32; 9]; 2] = [
         1200, // Chancellor (Rook + Knight)
         950,  // Archbishop (Bishop + Knight)
         200,  // Giraffe (reduced strength as requested)
-    ],
-    // Black pieces [0][1]
-    [
-        0,    // King
-        1100, // Queen
-        600,  // Rook
-        390,  // Bishop
-        360,  // Knight
-        120,  // Pawn
-        1200, // Chancellor
-        950,  // Archbishop
-        200,  // Giraffe (reduced strength)
-    ],
-];
+    ]
+;
 
 #[rustfmt::skip]
-pub const ENDGAME_PIECE_VALUES: [[i32; 9]; 2] = [
-    // White pieces [1][0]
+pub const ENDGAME_PIECE_VALUES: [i32; 9] = 
     [
         0,    // King (effectively infinite)
         1150, // Queen
@@ -44,20 +31,8 @@ pub const ENDGAME_PIECE_VALUES: [[i32; 9]; 2] = [
         1250, // Chancellor
         980,  // Archbishop
         200,  // Giraffe (reduced strength as requested)
-    ],
-    // Black pieces [1][1]
-    [
-        0,    // King
-        1150, // Queen
-        650,  // Rook
-        420,  // Bishop
-        380,  // Knight
-        130,  // Pawn
-        1250, // Chancellor
-        980,  // Archbishop
-        200,  // Giraffe (reduced strength)
-    ],
-];
+    ]
+;
 
 #[rustfmt::skip]
 const fn pst() -> [[[i32; 144]; 9]; 2] {
@@ -281,7 +256,7 @@ pub const PLAYER_TERRITORY: [BB12<Square12>; 2] = generate_player_sides();
 
 #[rustfmt::skip]
 pub const PHASE_WEIGHTS: [i32; 9] = [
-    0, // King
+    1, // King
     4, // Queen
     2, // Rook
     2, // Bishop

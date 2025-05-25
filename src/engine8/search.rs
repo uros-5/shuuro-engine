@@ -29,12 +29,12 @@ use super::defs::PLAYER_TERRITORY;
 pub struct Defs8 {}
 
 impl EngineDefs<Square8, BB8<Square8>, 8> for Defs8 {
-    fn get_piece_value(piece_type: PieceType, color: Color) -> i32 {
-        PIECE_VALUES[color.index()][piece_type.index()]
+    fn get_piece_value(piece_type: PieceType) -> i32 {
+        PIECE_VALUES[piece_type.index()]
     }
 
-    fn get_endgame_piece_value(piece_type: PieceType, color: Color) -> i32 {
-        ENDGAME_PIECE_VALUES[color.index()][piece_type.index()]
+    fn get_endgame_piece_value(piece_type: PieceType) -> i32 {
+        ENDGAME_PIECE_VALUES[piece_type.index()]
     }
 
     fn get_pst_value(square: Square8, piece_type: PieceType, color: Color) -> i32 {
@@ -73,6 +73,7 @@ impl EngineDefs<Square8, BB8<Square8>, 8> for Defs8 {
 pub struct Engine8 {
     pub last_move: Option<Move<Square8>>,
     pub best_move: Option<Move<Square8>>,
+    pub score: i32,
 }
 
 impl
@@ -114,18 +115,12 @@ impl
         }
     }
 
-    fn update_last_move(&mut self, mv: shuuro::Move<Square8>) {
-        self.last_move = Some(mv)
-    }
-
-    fn update_best_move(&mut self, mv: shuuro::Move<Square8>) {
-        self.best_move = Some(mv);
-    }
-
     fn new() -> Self {
+        Self::init();
         Self {
             last_move: None,
             best_move: None,
+            score: 0,
         }
     }
 
