@@ -81,7 +81,6 @@ impl<S: Square + Hash + Send + 'static> EngineMove<S> {
                     let mv = Move::new(*from, target);
                     return Some(mv);
                 }
-                return None;
             }
             return None;
         };
