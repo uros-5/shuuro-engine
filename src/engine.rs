@@ -87,7 +87,7 @@ where
                 cmd if cmd.starts_with("go") => {
                     // Start search and return best move
 
-                    let best_move = self.alpha_beta_search2(
+                    let best_move = self.alpha_beta_search(
                         &position,
                         0,
                         -INFINITY as i32,
@@ -112,7 +112,7 @@ where
         }
     }
 
-    fn alpha_beta_search2(
+    fn alpha_beta_search(
         &mut self,
         position: &P,
         depth: i32,
@@ -156,7 +156,7 @@ where
                 let _ = position2.make_move(mov);
 
                 // Recursively search
-                let value = self.alpha_beta_search2(position, depth - 1, alpha, beta, Color::Black);
+                let value = self.alpha_beta_search(position, depth - 1, alpha, beta, Color::Black);
 
                 // Update best value
                 best_value = best_value.max(value);
@@ -182,7 +182,7 @@ where
                 let _ = position2.make_move(mov);
 
                 // Recursively search
-                let value = self.alpha_beta_search2(position, depth - 1, alpha, beta, Color::White);
+                let value = self.alpha_beta_search(position, depth - 1, alpha, beta, Color::White);
 
                 // Update best value
                 best_value = best_value.min(value);

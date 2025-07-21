@@ -99,7 +99,9 @@ dependencies = [
 
 [[package]]
 name = "shuuro"
-version = "1.1.7"
+version = "1.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f0cef2da33162484d2cb54537fc2485d7f90b2128bcab75b5b1274a765cbae9"
 dependencies = [
  "itertools",
  "rand",

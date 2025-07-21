@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 
-shuuro = { path="../shuuro", features = ["shuuro12", "shuuro8", "shuuro6"] }
+shuuro = { version = "1.1.8", features = ["shuuro12", "shuuro8", "shuuro6"] }
